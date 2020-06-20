@@ -1,0 +1,394 @@
+<html>
+<head>
+    <link href="{{ url_for('static', filename='bower_components/croppr/dist/croppr.css') }}" rel="stylesheet"/>
+    <script src="{{ url_for('static', filename='bower_components/croppr/dist/croppr.js') }}"></script>
+    <style>
+        img {
+          display: block;
+          height: 100%;
+        }
+        .rightClickMenu {
+            width: 10%;
+            height: 5%;
+            font-size: 75%;
+            list-style: none;
+            position: fixed;
+            background: purple;
+        }
+        .cropMenu {
+            width: 10%;
+            height: 5%;
+            font-size: 75%;
+            list-style: none;
+            position: fixed;
+            background: purple;
+        }
+        canvas {
+            border: 5px solid  black;
+        }
+        .row {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <img class="page" id="image1" src="{{ url_for('static', filename='content.png') }}" />
+        <img class="page" id="image2" src="{{ url_for('static', filename='ch1.png') }}" />
+    </div>
+    <script>
+
+        function crop(event){
+            event.preventDefault();
+            var cropInstance = new Croppr(event.target, {
+
+                onCropEnd: function(data) {
+                  console.log(data.x, data.y, data.width, data.height);
+                }
+            });
+        }
+
+        function componentMenu(event){
+            window.img_clicked = event.target
+            event.preventDefault();
+            for(var el of document.getElementsByClassName("rightClickMenu")){
+                el.remove();
+            }
+            var menu = document.createElement("ul");
+            menu.classList.add("rightClickMenu");
+            menu.style.left = 0.99*event.clientX+"px";
+            menu.style.top = 0.93*event.clientY+"px";
+            menu.addEventListener("mouseout",onMouseOut,false);
+            menu.addEventListener("contextmenu",(e)=>e.preventDefault(),false);
+            for(option of ["Crop","Process"]){
+                var li = document.createElement("li");
+                li.addEventListener("mouseover",(e)=>e.target.style.background="red",false);
+                li.addEventListener("click",window[`on${option}Option`],false);
+                li.style.width="100%";
+                li.innerHTML = option;
+                menu.appendChild(li);
+            } 
+            window.onscroll = function(e) { 
+                for(var el of document.getElementsByClassName("rightClickMenu")){
+                el.remove();
+                }
+            }
+            document.body.appendChild(menu);
+
+        }
+
+        function onMouseOut(event){
+            var e = event.toElement || event.relatedTarget;
+            var menu = document.getElementsByClassName("rightClickMenu")[0];  
+
+            if (!e || e.parentNode == menu || e == menu) {
+                return;
+            }
+            else if(event.target.tagName == "UL"){
+                event.target.remove();
+            }
+            else if(event.target.tagName == "LI"){
+                event.target.parentNode.remove();
+            }
+        }
+        function onProcessOption(event){
+            var canvasEl = window.img_clicked
+            var base64 = canvasEl.toDataURL("image/jpeg");
+            var form_data = new FormData();
+            form_data.append("base64",base64)
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function(){
+                if(xhttp.response){
+                    result=JSON.parse(xhttp.response)
+                    if(result["message"] == "success"){
+                        console.log(result["message"]);
+                        var p = document.createElement("span")
+                        p.textContent = result["text"];
+                        window.img_clicked.parentNode.replaceChild(p, window.img_clicked);
+                        document.body.appendChild(p)
+                    }
+                }
+            }
+            xhttp.open("POST", "/", true);
+            xhttp.send(form_data);
+            event.target.parentNode.remove()
+        }
+        function onCropOption(event){
+            event.target.parentNode.remove()
+            var rect = window.img_clicked.getBoundingClientRect();
+            console.log(rect.top, rect.right, rect.bottom, rect.left);
+            var menu = document.createElement("ul");
+            menu.classList.add("cropMenu");
+            menu.addEventListener("contextmenu",(e)=>e.preventDefault(),false);
+            menu.style.left = rect.right+"px" 
+            menu.style.top = rect.top+"px";
+            for(var i in [...Array(1).keys()]){
+                var li = document.createElement("li");
+                li.addEventListener("mouseover",(e)=>e.target.style.background="red",false);
+                li.addEventListener("click",finishCrop,false);
+                li.style.width="100%";
+                li.innerHTML = "finish cropping";
+                menu.appendChild(li);
+            } 
+            document.body.append(menu);
+            window.cropInstance = new Croppr(window.img_clicked, {
+
+                onCropEnd: function(data) {
+                  window.last_cropped_area = {
+                      "x":     data.x,
+                      "y":     data.y,
+                      "width": data.width,
+                      "height":data.height
+                  }
+
+                  /*determine_scenario(window.last_cropped_area["x"],      window.last_cropped_area["y"],
+                                     window.last_cropped_area["width"],  window.last_cropped_area["height"],
+                                     0,     0,
+                                     window.img_clicked["width"], window.img_clicked["height"],
+                                    );*/
+
+                }
+            });
+        }
+        function finishCrop(event){
+           event.target.parentNode.remove();
+           if(window.last_cropped_area){
+               var c = document.createElement("canvas");
+               c.width = window.img_clicked["width"];
+               c.height = window.img_clicked["height"];
+               var ctx = c.getContext("2d");
+               ctx.drawImage(window.img_clicked, 0, 0);
+               var scenario = determine_scenario(window.last_cropped_area["x"],      window.last_cropped_area["y"],
+                                                 window.last_cropped_area["width"],  window.last_cropped_area["height"],
+                                                 0,                             0,
+                                                 window.img_clicked["width"], window.img_clicked["height"],
+                                                 ctx
+                                                );
+               window.cropInstance.destroy();
+           }
+           else{
+               alert('crop area cant be the full image');
+           }
+        }
+    </script>
+    <script>
+        function determine_scenario(crop_x, crop_y, crop_dx, crop_dy,
+                                    fullimg_x, fullimg_y, fullimg_dx, fullimg_dy, fullimg_ctx){
+              console.log("crop : ", crop_x, crop_y, crop_dx, crop_dy); 
+              console.log("fullimg : ", fullimg_x, fullimg_y, fullimg_dx, fullimg_dy); 
+              console.log(crop_y > fullimg_y) 
+              console.log((crop_y+crop_dy) < (fullimg_y+fullimg_dy))
+              console.log(crop_x > fullimg_x)
+              console.log((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ///////////// checking all possible 0 borders /////////////
+              // the only no border
+              if( (crop_y > fullimg_y) &
+                  ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                  (crop_x > fullimg_x) &
+                  ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('no border');
+                  var crops = [
+                      [0,                   0,                fullimg_dx,                      crop_y],
+                      [0,                   crop_y,           crop_x,                          crop_dy],
+                      [crop_x,              crop_y,           crop_dx,                         crop_dy],
+                      [crop_x + crop_dx,    crop_y,           (fullimg_dx-(crop_x + crop_dx)), crop_dy],
+                      [0,                   (crop_y+crop_dy), fullimg_dx, crop_dy],
+                              ];
+                   append_mosaic(crops, fullimg_dx, fullimg_ctx);
+              }
+              ///////////// checking all possible 1 borders /////////////
+              // left border 
+              else if( (crop_y > fullimg_y) &
+                       ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                       (crop_x - fullimg_x < 5) &
+                       ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the left border');
+                  var crops = [
+                      [0,                   0,                fullimg_dx,                      crop_y],
+                      [0,                   crop_y,           crop_dx,                         crop_dy],
+                      [crop_dx,             crop_y,           (fullimg_dx-crop_dx),            crop_dy],
+                      [0,                   (crop_y+crop_dy), fullimg_dx,           (fullimg_dy-(crop_y+crop_dy))],
+                              ];
+                  append_mosaic(crops, fullimg_dx, fullimg_ctx);
+              }
+              // right border 
+              else if( (crop_y > fullimg_y) &
+                       ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                       (crop_x > fullimg_x) &
+                       ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the right border');
+                  var crops = [
+                      [0,                   0,                fullimg_dx,                      crop_y],
+                      [0,                   crop_y,           (fullimg_dx-crop_dx),                         crop_dy],
+                      [(fullimg_dx-crop_dx),             crop_y,           crop_dx,            crop_dy],
+                      [0,                   (crop_y+crop_dy), fullimg_dx,           (fullimg_dy-(crop_y+crop_dy))],
+                              ];
+                  append_mosaic(crops, fullimg_dx, fullimg_ctx);
+              }
+              // top border 
+              else if( (crop_y == fullimg_y) &
+                       ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                       (crop_x > fullimg_x) &
+                       ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the top border');
+                  var crops = [
+                      [0,                   0,                crop_x,                        crop_dy],
+                      [crop_x,              0,                crop_dx,                       crop_dy],
+                      [(crop_x+crop_dx),    0,                (fullimg_dx-(crop_x+crop_dx)), crop_dy],
+                      [0,                   crop_dy,           fullimg_dx,          (fullimg_dy-crop_dy)],
+                              ];
+                  append_mosaic(crops, fullimg_dx, fullimg_ctx);
+              }
+              // bottom border 
+              else if( (crop_y > fullimg_y) &
+                       ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                       (crop_x > fullimg_x) &
+                       ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the bottom border');
+              }
+              ///////////// checking all possible 2 borders /////////////
+              // top-left border
+              else if( (crop_y == fullimg_y) &
+                  ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                  (crop_x == fullimg_x) &
+                  ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the top-left border');
+              }
+              // top-right border
+              else if( (crop_y == fullimg_y) &
+                  ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                  (crop_x > fullimg_x) &
+                  ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the top-right border');
+              }
+              // bottom-left border
+              else if( (crop_y > fullimg_y) &
+                  ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                  (crop_x == fullimg_x) &
+                  ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the  bottom-left border');
+              }
+              // bottom-right border
+              else if( (crop_y > fullimg_y) &
+                  ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                  (crop_x > fullimg_x) &
+                  ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+              ){
+                  console.log('contact on the  bottom-right border');
+              }
+              ///////////// checking all possible 3 borders /////////////
+              // top-left-right border
+              else if( (crop_y == fullimg_y) &
+                   ((crop_y+crop_dy) < (fullimg_y+fullimg_dy)) &
+                   (crop_x == fullimg_x) &
+                   ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+               ){
+                   console.log('contact on the  top-left-right border');
+              }
+              // bottom-left-right border 
+              else if( (crop_y > fullimg_y) &
+                   ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                   (crop_x == fullimg_x) &
+                   ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+               ){
+                   console.log('contact on the  bottom-left-right border');
+              }
+              // top-left-bottom border
+              else if( (crop_y == fullimg_y) &
+                   ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                   (crop_x == fullimg_x) &
+                   ((crop_x+crop_dx) < (fullimg_x+fullimg_dx))
+               ){
+                   console.log('contact on the  top-left-bottom border');
+              }
+              // top-right-bottom border
+              else if( (crop_y == fullimg_y) &
+                   ((crop_y+crop_dy) == (fullimg_y+fullimg_dy)) &
+                   (crop_x > fullimg_x) &
+                   ((crop_x+crop_dx) == (fullimg_x+fullimg_dx))
+               ){
+                   console.log('contact on the  top-right-bottom border');
+               }
+
+
+        }
+
+        function partition_img(x, y, dx, dy, fullimg_ctx){
+               var crop_data = fullimg_ctx.getImageData(x, y, dx, dy);
+               var cropCanvas = document.createElement("canvas");
+               cropCanvas.width=dx;
+               cropCanvas.height=dy;
+               cropCanvas.addEventListener("contextmenu",componentMenu)
+               var ctx = cropCanvas.getContext("2d");
+               ctx.putImageData(crop_data, 0, 0);
+               return cropCanvas 
+        }
+
+        function crops_to_rows(crops, fullimg_dx){
+              var rows = []
+              var row_width = 0;
+              var row = [];
+              while(true){
+                  var next_area = crops.shift();
+                  if(crops.length > 0){
+                      if(row_width+next_area[2] <= fullimg_dx){
+                          row.push(next_area);
+                          row_width+=next_area[2];
+                      }
+                      else{
+                          rows.push(row);
+                          row_width = 0;
+                          row = [next_area];
+                      }
+                  }
+                  else{
+                      if(row_width+next_area[2] <= fullimg_dx){
+                          row.push(next_area);
+                          row_width+=next_area[2];
+                      }
+                      else{
+                          rows.push(row);
+                          row_width = 0;
+                          row = [next_area];
+                      }
+                      rows.push(row);
+                      break
+                  }
+              }
+              return rows
+        }
+      function append_mosaic(crops, fullimg_dx, fullimg_ctx){ 
+              var rows = crops_to_rows(crops, fullimg_dx);
+              console.log(rows);
+              for(row of rows){
+                  var rowEl = document.createElement("div");
+                  rowEl.classList.add("row");
+                  for(crop of row){
+                      var [x, y, width, height] = crop;
+                      var canvas = partition_img(x, y,
+                                    width, height,
+                                    fullimg_ctx
+                                );
+                      rowEl.appendChild(canvas);
+                  }
+                  document.body.appendChild(rowEl);
+              }
+      }
+    </script>
+    <script>
+        (function() {
+            for(pageEl of document.getElementsByClassName("page")){
+                pageEl.addEventListener("contextmenu",componentMenu)
+            }
+        })();
+    </script>
+</body>
+</html>
